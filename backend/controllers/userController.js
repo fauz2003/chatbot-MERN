@@ -1,40 +1,88 @@
 const mongoose = require('mongoose');
 const User = require('../models/userModel');
 const asyncHandler = require('express-async-handler');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
 
-//Register New User
-const registerUser = asyncHandler(async(req, res)=>{
-    const {email, password} = req.body;
+// Register User
+const registerUser = asyncHandler(async (req, res) => {
 
-    const userExists = User.find({email});
-
-    console.log(userExists);
-    if(userExists){
-        return res.status(400).json({message: 'User already exists'});
-    }
-   
+    const { email, password } = req.body;
     
-    const newUser = User.create({
+    if (!email || !password) {
+        return res.status(400).json({ message: 'Email and password are required' });
+    }
+
+    const userExists = await User.findOne({ email });
+    
+    if (userExists) {
+        return res.status(400).json({ message: 'User already exists' });
+    }
+
+    const hashPass = await bcrypt.hash(password, 10);
+
+    const user = await User.create({
         email,
-        password
+        password: hashPass,
     });
+
+    if (user) {
+        const token = generateToken(user._id);
+        return res.status(201).json({
+            _id: user._id,
+            email: user.email,
+            token,
+        });
+    } else {
+        res.status(400).json({ message: 'Invalid user data' });
+    }
 });
 
-//Login User
-const loginUser = asyncHandler(async(req, res)=>{
-    const {email, password} = req.body;
+// Generate Token
+const generateToken = (id) => {
+    return jwt.sign({ id }, process.env.JWT_SECRET, {
+        expiresIn: '30d',
+    });
+};
 
-    const user = User.find({email});
-
-    if(user){
-        if(user.password === password){
-            res.status(200).json({message:'Login Successful'});
-        }
+// Login User
+const loginUser = asyncHandler(async (req, res) => { 
+    
+    const { email, password } = req.body;
+    
+    if (!email || !password) {
+        return res.status(400).json({ message: 'Email and password are required' });
     }
-    else{
-        res.status(401).json({message:'User Not Found'});
+
+
+    const user = await User.findOne({ email });
+    if (user && (await bcrypt.compare(password, user.password))) {
+        const token = generateToken(user._id);
+        return res.status(200).json({
+            _id: user._id,
+            email: user.email,
+            token,
+        });
+    } else {
+        return res.status(401).json({ message: 'Invalid email or password' });
     }
+});
 
-})
+//Get all users (for testing)
+const getUsers = asyncHandler(async(req, res)=>{
+    const users = await User.find({});
+    res.status(200).json(users);
+});
 
-module.exports = {registerUser, loginUser};
+const getProfile = asyncHandler(async (req, res) => {
+    const user = await User.findById(req.user._id);
+
+    if (user) {
+        res.status(200).json(user);
+    } else {
+        res.status(404);
+        throw new Error('User not found');
+    }
+});
+
+module.exports = {registerUser, loginUser, getUsers, getProfile};
